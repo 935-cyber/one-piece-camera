@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漫画風 なりきりカメラ (Manga AR Camera)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Yuji+Syuku&display=swap" rel="stylesheet">
+    <style>
+        .font-manga {
+            font-family: 'Mochiy Pop One', 'Impact', sans-serif;
+        }
+        .font-yuji {
+            font-family: 'Yuji Syuku', serif;
+        }
+        /* Manga style text outline */
+        .manga-stroke {
+            -webkit-text-stroke: 2px black;
+            text-shadow: 3px 3px 0 #000;
+        }
+        .manga-bubble-stroke {
+            filter: drop-shadow(4px 4px 0px rgba(0, 0, 0, 0.9));
+        }
+        /* Canvas sizing */
+        .preview-container {
+            position: relative;
+            width: 100%;
+            max-width: 480px;
+            aspect-ratio: 9 / 16;
+            margin: 0 auto;
+            overflow: hidden;
+            border-radius: 1rem;
+            background-color: #1a1a1a;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+        /* Flash animation for capture */
+        @keyframes flashAnim {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        .flash-overlay {
+            position: absolute;
+            inset: 0;
+            background: white;
+            z-index: 50;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .animate-flash {
+            animation: flashAnim 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-zinc-900 text-zinc-100 min-h-screen flex flex-col font-sans selection:bg-red-600 selection:text-white">
+
+    <header class="bg-zinc-950 border-b border-zinc-800 py-3 px-4 sticky top-0 z-40">
+        <div class="max-w-xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <span class="bg-red-600 text-white font-bold px-2 py-0.5 rounded text-xs tracking-wider uppercase font-manga">ONE PIECE Style</span>
+                <h1 class="text-lg font-bold font-manga tracking-wide text-amber-400">なりきりカメラ</h1>
+            </div>
+            <label for="fileUpload" class="cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs px-3 py-1.5 rounded-lg border border-zinc-700 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-image text-amber-400"></i>
+                <span>写真選択</span>
+            </label>
+            <input type="file" id="fileUpload" accept="image/*" class="hidden">
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-xl w-full mx-auto p-4 flex flex-col justify-between gap-4">
+
+        <!-- Camera / Photo Preview Area -->
+        <div class="preview-container border-2 border-zinc-700 bg-black flex items-center justify-center">
+            <!-- Flash Layer -->
+            <div id="flashEffect" class="flash-overlay"></div>
+
+            <!-- Video element for live camera preview -->
+            <video id="webcam" autoplay playsinline class="w-full h-full object-cover"></video>
+
+            <!-- Image element for uploaded image preview -->
+            <img id="uploadedImage" class="w-full h-full object-cover hidden" alt="Uploaded photo">
+
+            <!-- Interactive Canvas Overlay (Displays Manga Elements in Real-time) -->
+            <canvas id="overlayCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
+
+            <!-- Realtime Controls Overlay on Frame -->
+            <div class="absolute top-3 right-3 z-20 flex gap-2">
+                <button id="switchCameraBtn" title="カメラ切り替え" class="bg-black/60 hover:bg-black/80 backdrop-blur-md text-white p-2.5 rounded-full w-10 h-10 flex items-center justify-center border border-white/20 transition active:scale-95">
+                    <i class="fa-solid fa-camera-rotate"></i>
+                </button>
+            </div>
+            
+            <div id="cameraStatus" class="absolute bottom-3 left-3 z-20 bg-black/60 backdrop-blur-md text-zinc-300 text-xs px-2.5 py-1 rounded-full border border-white/10 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span id="statusText">カメラ起動中</span>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-center gap-4 my-1">
+            <button id="captureBtn" class="group relative flex items-center justify-center w-20 h-20 bg-red-600 hover:bg-red-500 rounded-full border-4 border-white shadow-lg transition transform active:scale-95">
+                <span class="w-16 h-16 bg-red-600 group-hover:bg-red-500 rounded-full border-2 border-white/40 flex items-center justify-center">
+                    <i class="fa-solid fa-camera text-2xl text-white"></i>
+                </span>
+            </button>
+        </div>
+
+        <div class="bg-zinc-950 rounded-xl p-4 border border-zinc-800 space-y-4">
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-2">
+                <h2 class="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders"></i>
+                    エフェクト設定
+                </h2>
+                <button id="resetControlsBtn" class="text-xs text-zinc-400 hover:text-white transition">リセット</button>
+            </div>
+
+            <!-- Toggles for Overlay Elements -->
+            <div class="grid grid-cols-3 gap-2">
+                <label class="flex items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-lg cursor-pointer hover:border-zinc-700 transition">
+                    <input type="checkbox" id="toggleBubbles" checked class="accent-red-600 rounded">
+                    <span class="text-xs font-medium">吹き出し</span>
+                </label>
+                <label class="flex items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-lg cursor-pointer hover:border-zinc-700 transition">
+                    <input type="checkbox" id="toggleLines" checked class="accent-red-600 rounded">
+                    <span class="text-xs font-medium">集中線</span>
+                </label>
+                <label class="flex items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-lg cursor-pointer hover:border-zinc-700 transition">
+                    <input type="checkbox" id="toggleSfx" checked class="accent-red-600 rounded">
+                    <span class="text-xs font-medium">擬音 (ドン‼)</span>
+                </label>
+            </div>
+
+            <!-- Custom Text Inputs -->
+            <div class="space-y-2 pt-1">
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-[11px] text-zinc-400 block mb-1">右吹き出し (タイトル)</label>
+                        <input type="text" id="textRight" value="“海賊王”" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
+                    </div>
+                    <div>
+                        <label class="text-[11px] text-zinc-400 block mb-1">左吹き出し (決意)</label>
+                        <input type="text" id="textLeft" value="おれはなるっ!!!!" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[11px] text-zinc-400 block mb-1">擬音テキスト</label>
+                    <input type="text" id="textSfx" value="ドン‼" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="resultModal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex-col items-center justify-center p-4 overflow-y-auto">
+        <div class="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-4 max-h-[90vh]">
+            <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+                <h3 class="text-base font-bold font-manga text-amber-400 flex items-center gap-2">
+                    <i class="fa-solid fa-sparkles"></i> 完成画像
+                </h3>
+                <button id="closeModalBtn" class="text-zinc-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-full hover:bg-zinc-800 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Result Canvas Output Display -->
+            <div class="relative w-full aspect-[9/16] bg-black rounded-lg overflow-hidden flex items-center justify-center border border-zinc-800">
+                <canvas id="resultCanvas" class="w-full h-full object-contain"></canvas>
+            </div>
+
+            <!-- Modal Action Buttons -->
+            <div class="flex gap-3">
+                <button id="retakeBtn" class="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-zinc-700">
+                    <i class="fa-solid fa-rotate-left"></i> 撮り直す
+                </button>
+                <button id="downloadBtn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm shadow-lg shadow-red-900/40">
+                    <i class="fa-solid fa-download"></i> 画像を保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Canvas for full high-res generation -->
+    <canvas id="exportCanvas" class="hidden"></canvas>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const video = document.getElementById('webcam');
+            const uploadedImage = document.getElementById('uploadedImage');
+            const overlayCanvas = document.getElementById('overlayCanvas');
+            const ctx = overlayCanvas.getContext('2d');
+            
+            const captureBtn = document.getElementById('captureBtn');
+            const switchCameraBtn = document.getElementById('switchCameraBtn');
+            const fileUpload = document.getElementById('fileUpload');
+            const flashEffect = document.getElementById('flashEffect');
+            const statusText = document.getElementById('statusText');
+            
+            // Modal Elements
+            const resultModal = document.getElementById('resultModal');
+            const resultCanvas = document.getElementById('resultCanvas');
+            const closeModalBtn = document.getElementById('closeModalBtn');
+            const retakeBtn = document.getElementById('retakeBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const resetControlsBtn = document.getElementById('resetControlsBtn');
+
+            // Customization Input Elements
+            const toggleBubbles = document.getElementById('toggleBubbles');
+            const toggleLines = document.getElementById('toggleLines');
+            const toggleSfx = document.getElementById('toggleSfx');
+            const textRightInput = document.getElementById('textRight');
+            const textLeftInput = document.getElementById('textLeft');
+            const textSfxInput = document.getElementById('textSfx');
+
+            // State Variables
+            let currentStream = null;
+            let facingMode = 'user'; // 'user' or 'environment'
+            let isUsingUpload = false;
+            let animationFrameId = null;
+
+            async function startCamera() {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
+                try {
+                    const constraints = {
+                        video: {
+                            facingMode: facingMode,
+                            width: { ideal: 1080 },
+                            height: { ideal: 1920 }
+                        },
+                        audio: false
+                    };
+
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = currentStream;
+                    await video.play();
+
+                    isUsingUpload = false;
+                    video.classList.remove('hidden');
+                    uploadedImage.classList.add('hidden');
+                    statusText.textContent = facingMode === 'user' ? 'インカメラ起動中' : 'メインカメラ起動中';
+                } catch (err) {
+                    console.error("Camera access error:", err);
+                    statusText.textContent = "カメラアクセス拒否/未対応";
+                }
+            }
+
+            switchCameraBtn.addEventListener('click', () => {
+                facingMode = facingMode === 'user' ? 'environment' : 'user';
+                startCamera();
+            });
+
+            fileUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    uploadedImage.src = event.target.result;
+                    uploadedImage.onload = () => {
+                        isUsingUpload = true;
+                        video.classList.add('hidden');
+                        uploadedImage.classList.remove('hidden');
+                        if (currentStream) {
+                            currentStream.getTracks().forEach(track => track.stop());
+                        }
+                        statusText.textContent = "アップロード画像を表示中";
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+
+            function resizeOverlay() {
+                const rect = overlayCanvas.getBoundingClientRect();
+                overlayCanvas.width = rect.width;
+                overlayCanvas.height = rect.height;
+            }
+
+            window.addEventListener('resize', resizeOverlay);
+            resizeOverlay();
+
+            
+            // Draw Dynamic Focus / Speed Lines converging to center
+            function drawFocusLines(targetCtx, width, height) {
+                if (!toggleLines.checked) return;
+
+                targetCtx.save();
+                const centerX = width / 2;
+                const centerY = height * 0.55; // Slightly lower center focus point
+                const numLines = 70;
+                const outerRadius = Math.max(width, height) * 0.9;
+                const innerRadius = Math.min(width, height) * 0.28;
+
+                targetCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+
+                for (let i = 0; i < numLines; i++) {
+                    const angle = (i / numLines) * Math.PI * 2 + (Math.random() * 0.02);
+                    const lineWidth = (Math.random() * 0.04 + 0.01);
+
+                    targetCtx.beginPath();
+                    targetCtx.moveTo(
+                        centerX + Math.cos(angle - lineWidth) * outerRadius,
+                        centerY + Math.sin(angle - lineWidth) * outerRadius
+                    );
+                    targetCtx.lineTo(
+                        centerX + Math.cos(angle + lineWidth) * outerRadius,
+                        centerY + Math.sin(angle + lineWidth) * outerRadius
+                    );
+                    targetCtx.lineTo(
+                        centerX + Math.cos(angle) * (innerRadius + Math.random() * 40),
+                        centerY + Math.sin(angle) * (innerRadius + Math.random() * 40)
+                    );
+                    targetCtx.closePath();
+                    targetCtx.fill();
+                }
+                targetCtx.restore();
+            }
+
+            // Draw Jagged Manga Speech Balloon
+            function drawMangaBubble(targetCtx, x, y, width, height, text, subText) {
+                if (!toggleBubbles.checked) return;
+
+                targetCtx.save();
+                targetCtx.translate(x, y);
+
+                // Jagged speech balloon path
+                targetCtx.beginPath();
+                const points = 16;
+                const rx = width / 2;
+                const ry = height / 2;
+
+                for (let i = 0; i < points; i++) {
+                    const angle = (i / points) * Math.PI * 2;
+                    // Alternating radius for explosive jagged shape
+                    const varRadius = i % 2 === 0 ? 1.0 : 0.85 + (Math.random() * 0.08);
+                    const px = Math.cos(angle) * rx * varRadius;
+                    const py = Math.sin(angle) * ry * varRadius;
+
+                    if (i === 0) targetCtx.moveTo(px, py);
+                    else targetCtx.lineTo(px, py);
+                }
+                targetCtx.closePath();
+
+                // Fill white background with black outline
+                targetCtx.fillStyle = '#FFFFFF';
+                targetCtx.fill();
+                targetCtx.lineWidth = Math.max(4, width * 0.03);
+                targetCtx.strokeStyle = '#000000';
+                targetCtx.stroke();
+
+                // Draw Text Inside Bubble (Vertical layout simulation)
+                targetCtx.fillStyle = '#000000';
+                targetCtx.font = `900 ${Math.floor(height * 0.22)}px 'Mochiy Pop One', sans-serif`;
+                targetCtx.textAlign = 'center';
+                targetCtx.textBaseline = 'middle';
+
+                // Handle SubText (e.g. 『"に!!!"』 or 『海賊王』)
+                if (subText) {
+                    targetCtx.fillText(text, 0, -height * 0.12);
+                    targetCtx.font = `900 ${Math.floor(height * 0.26)}px 'Mochiy Pop One', sans-serif`;
+                    targetCtx.fillText(subText, 0, height * 0.18);
+                } else {
+                    targetCtx.fillText(text, 0, 0);
+                }
+
+                targetCtx.restore();
+            }
+
+            // Draw Manga Sound Effect (ドン‼)
+            function drawSfxText(targetCtx, width, height) {
+                if (!toggleSfx.checked) return;
+
+                const text = textSfxInput.value || "ドン‼";
+                targetCtx.save();
+
+                // Position SFX on left and right sides
+                const fontSize = Math.floor(width * 0.24);
+                targetCtx.font = `900 ${fontSize}px 'Mochiy Pop One', sans-serif`;
+
+                // Left SFX Part ("ド")
+                targetCtx.save();
+                targetCtx.translate(width * 0.18, height * 0.58);
+                targetCtx.rotate(-0.15);
+                
+                targetCtx.fillStyle = '#000000';
+                targetCtx.textAlign = 'center';
+                targetCtx.textBaseline = 'middle';
+                
+                // Bold shadow/3D effect for text
+                for (let i = 8; i > 0; i--) {
+                    targetCtx.fillText(text.charAt(0), i, i);
+                }
+                targetCtx.fillStyle = '#000000';
+                targetCtx.fillText(text.charAt(0), 0, 0);
+                targetCtx.restore();
+
+                // Right SFX Part ("ン‼")
+                if (text.length > 1) {
+                    targetCtx.save();
+                    targetCtx.translate(width * 0.82, height * 0.58);
+                    targetCtx.rotate(0.12);
+
+                    const restText = text.substring(1);
+                    for (let i = 8; i > 0; i--) {
+                        targetCtx.fillText(restText, i, i);
+                    }
+                    targetCtx.fillStyle = '#000000';
+                    targetCtx.fillText(restText, 0, 0);
+                    targetCtx.restore();
+                }
+
+                targetCtx.restore();
+            }
+
+            function renderOverlay(targetCtx, w, h) {
+                targetCtx.clearRect(0, 0, w, h);
+
+                // 1. Focus Lines
+                drawFocusLines(targetCtx, w, h);
+
+                // 2. Speech Bubbles
+                // Right Bubble: 『"海賊王"に!!!』
+                const rText = textRightInput.value || "“海賊王”";
+                drawMangaBubble(targetCtx, w * 0.76, h * 0.22, w * 0.38, h * 0.22, rText, "に!!!");
+
+                // Left Bubble: 『おれはなるっ!!!!』
+                const lText = textLeftInput.value || "おれはなるっ!!!!";
+                drawMangaBubble(targetCtx, w * 0.24, h * 0.22, w * 0.40, h * 0.22, "おれは", lText.replace("おれは", ""));
+
+                // 3. Sound Effect Text (ドン‼)
+                drawSfxText(targetCtx, w, h);
+            }
+
+            function animationLoop() {
+                renderOverlay(ctx, overlayCanvas.width, overlayCanvas.height);
+                animationFrameId = requestAnimationFrame(animationLoop);
+            }
+            animationLoop();
+
+            captureBtn.addEventListener('click', () => {
+                // Trigger Shutter Flash Effect
+                flashEffect.classList.remove('animate-flash');
+                void flashEffect.offsetWidth; // trigger reflow
+                flashEffect.classList.add('animate-flash');
+
+                // Determine Resolution for Export (Default to 1080x1920 9:16 portrait)
+                const exportCanvas = document.createElement('canvas');
+                const exportCtx = exportCanvas.getContext('2d');
+
+                let srcWidth = isUsingUpload ? uploadedImage.naturalWidth : video.videoWidth;
+                let srcHeight = isUsingUpload ? uploadedImage.naturalHeight : video.videoHeight;
+
+                if (!srcWidth || !srcHeight) {
+                    srcWidth = 1080;
+                    srcHeight = 1920;
+                }
+
+                exportCanvas.width = srcWidth;
+                exportCanvas.height = srcHeight;
+
+                // 1. Draw Photo Source (Webcam or Uploaded File)
+                if (isUsingUpload) {
+                    exportCtx.drawImage(uploadedImage, 0, 0, srcWidth, srcHeight);
+                } else {
+                    // Mirror image if front camera
+                    if (facingMode === 'user') {
+                        exportCtx.translate(srcWidth, 0);
+                        exportCtx.scale(-1, 1);
+                    }
+                    exportCtx.drawImage(video, 0, 0, srcWidth, srcHeight);
+                    exportCtx.setTransform(1, 0, 0, 1, 0, 0); // reset transform
+                }
+
+                // 2. Draw Manga Overlay at Target Resolution
+                renderOverlay(exportCtx, srcWidth, srcHeight);
+
+                // 3. Show Result in Modal
+                resultCanvas.width = srcWidth;
+                resultCanvas.height = srcHeight;
+                const resultCtx = resultCanvas.getContext('2d');
+                resultCtx.drawImage(exportCanvas, 0, 0);
+
+                resultModal.classList.remove('hidden');
+                resultModal.classList.add('flex');
+            });
+
+            closeModalBtn.addEventListener('click', () => {
+                resultModal.classList.add('hidden');
+                resultModal.classList.remove('flex');
+            });
+
+            retakeBtn.addEventListener('click', () => {
+                resultModal.classList.add('hidden');
+                resultModal.classList.remove('flex');
+            });
+
+            downloadBtn.addEventListener('click', () => {
+                const link = document.createElement('a');
+                link.download = `manga_kaizoku_${Date.now()}.png`;
+                link.href = resultCanvas.toDataURL('image/png');
+                link.click();
+            });
+
+            resetControlsBtn.addEventListener('click', () => {
+                toggleBubbles.checked = true;
+                toggleLines.checked = true;
+                toggleSfx.checked = true;
+                textRightInput.value = "“海賊王”";
+                textLeftInput.value = "おれはなるっ!!!!";
+                textSfxInput.value = "ドン‼";
+            });
+
+            // Start webcam on load
+            startCamera();
+        });
+    </script>
+</body>
+</html>
